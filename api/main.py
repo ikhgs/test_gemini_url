@@ -12,7 +12,7 @@ def upload_to_gemini(file_stream):
     """Télécharge le fichier sur Gemini et retourne son URI."""
     try:
         # Téléchargez le fichier sur Gemini
-        uploaded_file = genai.upload_file(file_stream, mime_type="image/jpg")
+        uploaded_file = genai.upload_file(file_stream, mime_type="image/jpeg")
         return uploaded_file.uri
     except Exception as e:
         print(f"Erreur lors du téléchargement du fichier : {e}")
