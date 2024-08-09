@@ -8,15 +8,11 @@ app = Flask(__name__)
 # Configure Google Gemini API Key
 genai.configure(api_key=os.environ["GEMINI_API_KEY"])
 
-# Function to download image from URL
-def download_image(image_url):
-    response = requests.get(image_url)
-    if response.status_code == 200:
-        filename = "temp_image.jpg"
-        with open(filename, 'wb') as f:
-            f.write(response.content)
-        return filename
-    return None
+# Function to download image from URL or handle image upload
+def save_uploaded_image(image):
+    image_path = "temp_image.jpg"
+    image.save(image_path)
+    return image_path
 
 def upload_to_gemini(path, mime_type=None):
     """Uploads the given file to Gemini."""
@@ -26,20 +22,18 @@ def upload_to_gemini(path, mime_type=None):
 
 @app.route('/gemini', methods=['POST'])
 def gemini():
-    data = request.json
-    prompt = data.get('prompt')
-    image_url = data.get('image_url')
+    if 'image' not in request.files:
+        return jsonify({"error": "No image part in the request"}), 400
 
-    # Download image from URL
-    if image_url:
-        image_path = download_image(image_url)
-        if image_path:
-            file = upload_to_gemini(image_path, mime_type="image/jpeg")
-            files = [file]
-        else:
-            return jsonify({"error": "Failed to download image"}), 400
-    else:
-        files = []
+    image = request.files['image']
+    prompt = request.form.get('prompt')
+
+    if not prompt:
+        return jsonify({"error": "No prompt provided"}), 400
+
+    # Save the uploaded image
+    image_path = save_uploaded_image(image)
+    file = upload_to_gemini(image_path, mime_type="image/jpeg")
 
     # Create the chat session with the image and text prompt
     chat_session = genai.GenerativeModel(
@@ -55,7 +49,7 @@ def gemini():
         history=[
             {
                 "role": "user",
-                "parts": files + [prompt],
+                "parts": [file, prompt],
             }
         ]
     )
