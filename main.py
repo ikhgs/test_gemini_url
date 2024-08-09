@@ -1,66 +1,67 @@
+import os
+import requests
 from flask import Flask, request, jsonify
 import google.generativeai as genai
-import os
-from io import BytesIO
 
 app = Flask(__name__)
 
-# Configurez votre clé API
+# Configure Google Gemini API Key
 genai.configure(api_key=os.environ["GEMINI_API_KEY"])
 
-def upload_to_gemini(file_stream):
-    """Télécharge le fichier sur Gemini et retourne son URI."""
-    try:
-        # Téléchargez le fichier sur Gemini
-        uploaded_file = genai.upload_file(file_stream, mime_type="image/jpeg")
-        return uploaded_file.uri
-    except Exception as e:
-        print(f"Erreur lors du téléchargement du fichier : {e}")
-        return str(e)
+# Function to download image from URL
+def download_image(image_url):
+    response = requests.get(image_url)
+    if response.status_code == 200:
+        filename = "temp_image.jpg"
+        with open(filename, 'wb') as f:
+            f.write(response.content)
+        return filename
+    return None
 
-@app.route('/', methods=['POST'])
-def chat():
-    try:
-        file_uri = None
-        if 'file' in request.files:
-            file = request.files['file']
-            file_bytes = file.read()
-            file_stream = BytesIO(file_bytes)
-            file_uri = upload_to_gemini(file_stream)
+def upload_to_gemini(path, mime_type=None):
+    """Uploads the given file to Gemini."""
+    file = genai.upload_file(path, mime_type=mime_type)
+    print(f"Uploaded file '{file.display_name}' as: {file.uri}")
+    return file
 
-        data = request.form
-        prompt = data.get('prompt', 'hello')
-        custom_id = data.get('customId', 'default_id')
+@app.route('/gemini', methods=['POST'])
+def gemini():
+    data = request.json
+    prompt = data.get('prompt')
+    image_url = data.get('image_url')
 
-        # Créez l'historique de la conversation
-        history = [
-            {
-                "role": "user",
-                "parts": [file_uri, prompt] if file_uri else [prompt],
-            }
-        ]
+    # Download image from URL
+    if image_url:
+        image_path = download_image(image_url)
+        if image_path:
+            file = upload_to_gemini(image_path, mime_type="image/jpeg")
+            files = [file]
+        else:
+            return jsonify({"error": "Failed to download image"}), 400
+    else:
+        files = []
 
-        # Créez le modèle et démarrez la session de chat
-        generation_config = {
+    # Create the chat session with the image and text prompt
+    chat_session = genai.GenerativeModel(
+        model_name="gemini-1.5-flash",
+        generation_config={
             "temperature": 1,
             "top_p": 0.95,
             "top_k": 64,
             "max_output_tokens": 8192,
             "response_mime_type": "text/plain",
         }
+    ).start_chat(
+        history=[
+            {
+                "role": "user",
+                "parts": files + [prompt],
+            }
+        ]
+    )
 
-        model = genai.GenerativeModel(
-            model_name="gemini-1.5-flash",
-            generation_config=generation_config,
-        )
-
-        chat_session = model.start_chat(history=history)
-        response = chat_session.send_message(prompt)
-
-        return jsonify({"message": response.text, "customId": custom_id})
-
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    response = chat_session.send_message(prompt)
+    return jsonify({"response": response.text})
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
+    app.run(debug=True, host='0.0.0.0', port=5000)
